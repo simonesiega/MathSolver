@@ -4,3 +4,15 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+
+# Configurazioni dei profili di compilazione
+[profile.dev]
+opt-level = 0
+debug = true                 
+overflow-checks = true       
+
+[profile.release]
+opt-level = 3                
+debug = false                
+panic = "abort"              
+lto = true

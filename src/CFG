@@ -1,0 +1,40 @@
+Grammatica utilizzata per la rappresentazione e parsing di espressioni aritmetiche
+
+Questa grammatica definisce le regole per la sintassi di espressioni che coinvolgono numeri, 
+somma, prodotto e la possibilità di concatenare sequenze di espressioni. La grammatica è
+progettata per espressioni matematiche con numeri in formato double, somma e prodotto di espressioni
+tra parentesi e gestione di sequenze di numeri separati da punti.
+
+La notazione usata è una forma di Backus-Naur Form (BNF), che è comunemente utilizzata
+per descrivere la sintassi di linguaggi formali come quelli di programmazione.
+
+E → (double) | (+ES) | (*ES)
+S → E | ES
+N → S | S . U N
+S → U | − U S
+U → D | UD
+D → 0 | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 | 9
+
+Descrizione dei componenti della grammatica:
+
+E (Espressione) rappresenta un'espressione matematica che può essere:
+
+1. Un numero, in formato double (ad esempio, 1.23, -4.56, ecc.)
+2. Una somma di espressioni, racchiusa tra parentesi con il simbolo "+" (ad esempio, +(1 2))
+3. Un prodotto di espressioni, racchiuso tra parentesi con il simbolo "*" (ad esempio, *(1 2))
+
+S (Sequenza) rappresenta una sequenza di espressioni. Può essere una singola espressione (E)
+   o una sequenza di espressioni separate da spazi (ES).
+
+N (Numero) è una sequenza di termini S separati da punti. Nella nostra grammatica, N può
+   essere usato per rappresentare numeri in notazione decimale, dove ciascun termine è una
+   sequenza di espressioni separate da punti (ad esempio, "1.2" o "3.4.5").
+
+S → U | − U S descrive una sequenza di termini che può essere un numero unitaria (U) o
+   un numero preceduto dal segno meno "−" (ad esempio, -1, -2, ecc.), seguito da una sequenza
+   di altri termini.
+
+U (Unità) rappresenta una sequenza di numeri (UD). Un'unità può essere composta da una
+   singola cifra (D), oppure da più cifre (UD) come in "123".
+
+D (Cifra) rappresenta una cifra, ossia uno dei numeri da 0 a 9.
