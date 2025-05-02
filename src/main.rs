@@ -1,178 +1,167 @@
-use std::io::{self, BufRead};
-use std::iter::Peekable;
-use std::str::Chars;
+use std::io::{self, Write};
 
-/// Tipo che rappresenta un'espressione aritmetica.
-///
-/// `Expr` può essere un numero (`Num(f64)`), una somma (`Add(Vec<Expr>)`), o un prodotto (`Mul(Vec<Expr>)`).
 #[derive(Debug)]
-enum Expr {
-    Num(f64),         // Numero (tipo `f64`)
-    Add(Vec<Expr>),    // Somma di espressioni
-    Mul(Vec<Expr>),    // Prodotto di espressioni
+struct Parser {
+    input: Vec<char>,
+    pos: usize,
 }
 
-/// Parsifica un'espressione aritmetica.
-///
-/// Questa funzione analizza un'espressione che può essere un numero, una somma o un prodotto, racchiuso in parentesi.
-///
-/// # Parametri
-/// - `chars`: Un iteratore mutabile su caratteri (`Peekable<Chars>`) che rappresenta l'input da parsare.
-///
-/// # Ritorno
-/// Restituisce un risultato (`Result<Expr, String>`), dove:
-/// - `Ok(Expr)`: Una struttura di tipo `Expr` che rappresenta l'espressione parsata.
-/// - `Err(String)`: Un errore che descrive il motivo per cui l'espressione non è valida.
-fn parse_expr(chars: &mut Peekable<Chars>) -> Result<Expr, String> {
-    skip_whitespace(chars); 
+impl Parser {
+    fn new(input: &str) -> Self {
+        Self {
+            input: input.chars().collect(),
+            pos: 0,
+        }
+    }
 
-    match chars.next() {  
-        
-        // Se il prossimo carattere é '(' analizza l'espressione interna
-        Some('(') => {
-            
-            skip_whitespace(chars);
-            
-            match chars.next() {
-                /*
-                * Operatore ?:
-                * Se il risultato é Ok(valore), restituisce il valore.
-                * Se il risultato é Err(errore), esce dalla funzione restituendo l'errore.
-                 */
-                Some('+') => Ok(Expr::Add(parse_expr_list(chars)?)),  // Caso Somma
-                Some('*') => Ok(Expr::Mul(parse_expr_list(chars)?)),  // Caso Prodotto
-                
-                // Altri casi che non richiedono operazione
-                Some(c) if c.is_digit(10) || c == '-' || c == '.' => {
-                    let mut num_str = String::new();
-                    num_str.push(c);  
-                    
-                    // Leggi i successivi caratteri se sono numeri o decimali
-                    while let Some(&c) = chars.peek() {
-                        if c.is_ascii_digit() || c == '.' {
-                            num_str.push(c);  
-                            chars.next();  
-                        } else {
-                            break;
-                        }
-                    }
-                    // Verifica che ci sia una parentesi di chiusura
-                    if chars.next() != Some(')') {
-                        return Err("Expected ')' after number".into());
-                    }
-                    
-                    // Parsa il numero da stringa a f64
-                    num_str
-                        .parse::<f64>()
-                        .map(Expr::Num)
-                        .map_err(|_| "Invalid number".into())  // Gestisce errori nel parse
+    fn parse(&mut self) -> f64 {
+        let result = self.parse_expression();
+        self.skip_whitespace();
+        match self.peek() {
+            Some('=') => result,
+            Some(c) => panic!("Expected '=' at the end, found '{}'", c),
+            None => panic!("Expected '=' at the end, but reached end of input"),
+        }
+    }
+
+    fn parse_expression(&mut self) -> f64 {
+        println!("[parse_expression] pos: {}", self.pos);
+        let mut value = self.parse_product();
+        loop {
+            self.skip_whitespace();
+            match self.peek() {
+                Some('+') => {
+                    println!("[parse_expression] found '+' at {}", self.pos);
+                    self.consume();
+                    value += self.parse_product();
                 }
-                _ => Err("Invalid expression".into()), // Errore per simboli non validi
+                Some('-') => {
+                    println!("[parse_expression] found '-' at {}", self.pos);
+                    self.consume();
+                    value -= self.parse_product();
+                }
+                _ => break,
+            }
+        }
+        value
+    }
+
+    fn parse_product(&mut self) -> f64 {
+        println!("[parse_product] pos: {}", self.pos);
+        let mut value = self.parse_term();
+        loop {
+            self.skip_whitespace();
+            match self.peek() {
+                Some('*') => {
+                    println!("[parse_product] found '*' at {}", self.pos);
+                    self.consume();
+                    value *= self.parse_term();
+                }
+                Some('/') => {
+                    println!("[parse_product] found '/' at {}", self.pos);
+                    self.consume();
+                    value /= self.parse_term();
+                }
+
+                /*
+                * Moltiplicazione implicita nei casi:
+                * Un numero è seguito da una parentesi: .12(…)
+                * Una parentesi è seguita da un numero: (2+1)3
+                * Due parentesi sono adiacenti: (2)(3)
+                 */
+                Some('(') => {
+                    println!("[parse_product] found implicit '*' before '(' at {}", self.pos);
+                    value *= self.parse_term();
+                }
+                Some(c) if c.is_ascii_digit() || c == '.' => {
+                    println!("[parse_product] found implicit '*' before digit at {}", self.pos);
+                    value *= self.parse_term();
+                }
+                _ => break,
+            }
+        }
+        value
+    }
+
+    fn parse_term(&mut self) -> f64 {
+        self.skip_whitespace();
+        println!("[parse_term] pos: {}, next: {:?}", self.pos, self.peek());
+        match self.peek() {
+            Some('-') => {
+                self.consume();
+                -self.parse_term()
+            }
+            Some('(') => {
+                self.consume();
+                let value = self.parse_expression();
+                self.skip_whitespace();
+                match self.peek() {
+                    Some(')') => {
+                        self.consume();
+                        value
+                    }
+                    _ => panic!("Expected ')' at position {}", self.pos),
+                }
+            }
+            _ => self.parse_number(),
+        }
+    }
+
+    fn parse_number(&mut self) -> f64 {
+        self.skip_whitespace();
+        let mut num = String::new();
+        let mut dot_seen = false;
+
+        while let Some(c) = self.peek() {
+            if c.is_ascii_digit() {
+                num.push(c);
+                self.consume();
+            } else if c == '.' && !dot_seen {
+                dot_seen = true;
+                num.push(c);
+                self.consume();
+            } else {
+                break;
             }
         }
 
-        // Se il primo carattere non è '(' è errore
-        _ => Err("Expected '('".into()),  
-    }
-}
-
-/// Parsifica una lista di espressioni separate da parentesi.
-///
-/// Questa funzione gestisce una lista di espressioni aritmetiche che sono racchiuse tra parentesi.
-/// Ogni espressione può essere una somma o un prodotto, e vengono raccolte in un vettore.
-///
-/// # Parametri
-/// - `chars`: Un iteratore mutabile su caratteri (`Peekable<Chars>`) che rappresenta l'input da parsare.
-///
-/// # Ritorno
-/// Restituisce un risultato (`Result<Vec<Expr>, String>`), dove:
-/// - `Ok(Vec<Expr>)`: Una lista di espressioni parsate.
-/// - `Err(String)`: Un errore che descrive il motivo per cui l'espressione non è valida.
-fn parse_expr_list(chars: &mut Peekable<Chars>) -> Result<Vec<Expr>, String> {
-    let mut exprs = Vec::new();
-    loop {
-        skip_whitespace(chars);  
-        
-        if let Some(&')') = chars.peek() {
-            // Consuma la parentesi ')'
-            chars.next();  
-            break;
+        if num.is_empty() || num == "." {
+            panic!("Expected number at position {}, found {:?}", self.pos, self.peek());
         }
-        
-        // Parsifica ogni espressione
-        exprs.push(parse_expr(chars)?);
-    }
-    Ok(exprs)
-}
 
-/// Salta gli spazi bianchi nel flusso di caratteri.
-///
-/// Questa funzione consuma tutti gli spazi bianchi presenti tra i caratteri in modo che il parser possa continuare
-/// con i caratteri significativi.
-fn skip_whitespace(chars: &mut Peekable<Chars>) {
-    loop {
-        // Preleva il carattere
-        match chars.peek() {
-            Some(&c) if c.is_whitespace() => { chars.next(); } // Se é uno spazio bianco lo consuma
-            _ => break, 
+        let parsed = num.parse::<f64>().expect("Invalid number format");
+        println!("[parse_number] parsed '{}' as {}", num, parsed);
+        parsed
+    }
+
+    fn skip_whitespace(&mut self) {
+        while let Some(c) = self.peek() {
+            if c.is_whitespace() {
+                self.consume();
+            } else {
+                break;
+            }
         }
     }
-}
 
-/// Calcola il valore numerico di un'espressione.
-///
-/// Questa funzione calcola il valore di un'espressione aritmetica, eseguendo operazioni di somma e prodotto
-/// in modo ricorsivo, a seconda del tipo di espressione.
-///
-/// # Parametri
-/// - `expr`: Un riferimento all'espressione (`&Expr`) che deve essere valutata.
-///
-/// # Ritorno
-/// Restituisce un valore di tipo `f64` che rappresenta il risultato numerico dell'espressione.
-fn eval(expr: &Expr) -> f64 {
-    match expr {
-        Expr::Num(n) => *n,  // Caso base: ritorna direttamente il valore
-        /*
-        * children.iter() => Itera su tutti i figli dell'espressione
-        * .map(eval) => Esegue eval su ogni elemento dell'iteratore
-         */
-        Expr::Add(children) => children.iter().map(eval).sum(),  // Somma
-        Expr::Mul(children) => children.iter().map(eval).product(),  // Prodotto
+    fn peek(&self) -> Option<char> {
+        self.input.get(self.pos).copied()
+    }
+
+    fn consume(&mut self) {
+        self.pos += 1;
     }
 }
 
 fn main() {
-    println!("Enter an arithmetic expression:");
+    println!("Inserisci un'espressione che termina con '=' (es: ((8-9.81*3.14)-.12(1*9/2.3)+-5.17)= )");
+    print!("> ");
+    io::stdout().flush().unwrap();
 
-    // Ottiene un handle per lo standard input, consentendo di leggere i dati da tastiera o da file.
-    let stdin = io::stdin();
-    // Blocca l'accesso allo standard input per leggere la riga successiva.
-    // 'lines()' restituisce un iteratore che produce ogni riga come Result<String, std::io::Error>.
-    // 'next()' restituisce il primo elemento dell'iteratore (una riga), mentre 'unwrap()' estrae il valore
-    // e termina il programma se si verifica un errore.
-    let line = stdin.lock().lines().next().unwrap().unwrap();
-    // Converte la riga in un iteratore di caratteri.
-    // 'peekable()' rende l'iteratore capace di guardare il prossimo carattere
-    // senza avanzare l'iteratore né consumarlo.
-    let mut chars = line.chars().peekable();
-    
-    
-    /* 
-    * Espressioni verificate
-    * (+(+(1.8)(6))(*(1.1)(2)))
-    * (+(+(1.8)(6))(*(1.1)(-2)))
-    * (*(+(2)(3))(2.5)))
-    */
+    let mut input = String::new();
+    io::stdin().read_line(&mut input).unwrap();
 
-    // 'parse_expr' restituisce un Result: Ok(expr) se il parsing ha successo, Err(e) in caso di errore.
-    match parse_expr(&mut chars) {
-        // Il parsing ha avuto successo
-        Ok(expr) => {
-            // Espressione parsata
-            println!("Parsed expression: {:?}", expr);  
-            println!("Result: {}", eval(&expr));  
-        }
-        // Errore durante il parsing
-        Err(e) => eprintln!("Error: {}", e),  
-    }
+    let mut parser = Parser::new(&input.trim());
+    let result = parser.parse();
+    println!("Risultato: {}", result);
 }
