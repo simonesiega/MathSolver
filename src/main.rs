@@ -1,167 +1,306 @@
+#[allow(unused)]
 use std::io::{self, Write};
+#[allow(unused)]
+use log::{info, debug};
+
+#[cfg(debug_assertions)]
+macro_rules! debug_log {
+    ($($arg:tt)*) => (log::debug!($($arg)*));
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! debug_log {
+    ($($arg:tt)*) => ();
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum Token {
+    Number(f64),
+    Plus,
+    Minus,
+    Multiply,
+    Divide,
+    LeftParen,
+    RightParen,
+    Equals,
+}
+
+impl Token {
+    #[inline]
+    fn from_char(c: char) -> Option<Self> {
+        match c {
+            '+' => Some(Token::Plus),
+            '-' => Some(Token::Minus),
+            '*' => Some(Token::Multiply),
+            '/' => Some(Token::Divide),
+            '(' => Some(Token::LeftParen),
+            ')' => Some(Token::RightParen),
+            '=' => Some(Token::Equals),
+            _ => None,
+        }
+    }
+
+    #[allow(unused)]
+    #[inline]
+    fn is_operator(&self) -> bool {
+        matches!(self, Token::Plus | Token::Minus | Token::Multiply | Token::Divide)
+    }
+}
 
 #[derive(Debug)]
-struct Parser {
-    input: Vec<char>,
-    pos: usize,
+#[allow(unused)]
+enum MathError {
+    InvalidNumber(String),
+    MissingParenthesis(usize),
+    UnexpectedEnd,
+    InvalidExpression(String),
 }
 
-impl Parser {
-    fn new(input: &str) -> Self {
+impl std::fmt::Display for MathError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            MathError::InvalidNumber(msg) => write!(f, "Numero non valido: {}", msg),
+            MathError::MissingParenthesis(pos) => write!(f, "Parentesi mancante alla posizione {}", pos),
+            MathError::UnexpectedEnd => write!(f, "Espressione terminata inaspettatamente"),
+            MathError::InvalidExpression(msg) => write!(f, "Espressione non valida: {}", msg),
+        }
+    }
+}
+
+impl std::error::Error for MathError {}
+
+type MathResult = Result<f64, MathError>;
+
+struct Tokenizer<'a> {
+    input: &'a str,
+    position: usize,
+}
+
+impl<'a> Tokenizer<'a> {
+    fn new(input: &'a str) -> Self {
+        debug_log!("Creazione nuovo tokenizer con input: {}", input);
         Self {
-            input: input.chars().collect(),
-            pos: 0,
+            input,
+            position: 0,
         }
     }
 
-    fn parse(&mut self) -> f64 {
-        let result = self.parse_expression();
-        self.skip_whitespace();
-        match self.peek() {
-            Some('=') => result,
-            Some(c) => panic!("Expected '=' at the end, found '{}'", c),
-            None => panic!("Expected '=' at the end, but reached end of input"),
-        }
-    }
-
-    fn parse_expression(&mut self) -> f64 {
-        println!("[parse_expression] pos: {}", self.pos);
-        let mut value = self.parse_product();
-        loop {
-            self.skip_whitespace();
-            match self.peek() {
-                Some('+') => {
-                    println!("[parse_expression] found '+' at {}", self.pos);
-                    self.consume();
-                    value += self.parse_product();
+    fn tokenize(&mut self) -> Result<Vec<Token>, MathError> {
+        debug_log!("Inizio tokenizzazione");
+        let mut tokens = Vec::new();
+        
+        while self.position < self.input.len() {
+            let c = self.current_char();
+            match c {
+                c if c.is_whitespace() => {
+                    self.advance();
                 }
-                Some('-') => {
-                    println!("[parse_expression] found '-' at {}", self.pos);
-                    self.consume();
-                    value -= self.parse_product();
+                c if c.is_ascii_digit() || c == '.' => {
+                    let token = self.parse_number()?;
+                    debug_log!("Token numerico trovato: {:?}", token);
+                    tokens.push(token);
                 }
-                _ => break,
-            }
-        }
-        value
-    }
-
-    fn parse_product(&mut self) -> f64 {
-        println!("[parse_product] pos: {}", self.pos);
-        let mut value = self.parse_term();
-        loop {
-            self.skip_whitespace();
-            match self.peek() {
-                Some('*') => {
-                    println!("[parse_product] found '*' at {}", self.pos);
-                    self.consume();
-                    value *= self.parse_term();
-                }
-                Some('/') => {
-                    println!("[parse_product] found '/' at {}", self.pos);
-                    self.consume();
-                    value /= self.parse_term();
-                }
-
-                /*
-                * Moltiplicazione implicita nei casi:
-                * Un numero è seguito da una parentesi: .12(…)
-                * Una parentesi è seguita da un numero: (2+1)3
-                * Due parentesi sono adiacenti: (2)(3)
-                 */
-                Some('(') => {
-                    println!("[parse_product] found implicit '*' before '(' at {}", self.pos);
-                    value *= self.parse_term();
-                }
-                Some(c) if c.is_ascii_digit() || c == '.' => {
-                    println!("[parse_product] found implicit '*' before digit at {}", self.pos);
-                    value *= self.parse_term();
-                }
-                _ => break,
-            }
-        }
-        value
-    }
-
-    fn parse_term(&mut self) -> f64 {
-        self.skip_whitespace();
-        println!("[parse_term] pos: {}, next: {:?}", self.pos, self.peek());
-        match self.peek() {
-            Some('-') => {
-                self.consume();
-                -self.parse_term()
-            }
-            Some('(') => {
-                self.consume();
-                let value = self.parse_expression();
-                self.skip_whitespace();
-                match self.peek() {
-                    Some(')') => {
-                        self.consume();
-                        value
+                c => {
+                    if let Some(token) = Token::from_char(c) {
+                        debug_log!("Token operatore trovato: {:?}", token);
+                        tokens.push(token);
+                        self.advance();
+                    } else {
+                        return Err(MathError::InvalidExpression(
+                            format!("Carattere non valido: {}", c)
+                        ));
                     }
-                    _ => panic!("Expected ')' at position {}", self.pos),
                 }
             }
-            _ => self.parse_number(),
         }
+        
+        debug_log!("Tokenizzazione completata. Tokens: {:?}", tokens);
+        Ok(tokens)
     }
 
-    fn parse_number(&mut self) -> f64 {
-        self.skip_whitespace();
-        let mut num = String::new();
-        let mut dot_seen = false;
+    fn parse_number(&mut self) -> Result<Token, MathError> {
+        let start = self.position;
+        let mut has_decimal = false;
 
-        while let Some(c) = self.peek() {
-            if c.is_ascii_digit() {
-                num.push(c);
-                self.consume();
-            } else if c == '.' && !dot_seen {
-                dot_seen = true;
-                num.push(c);
-                self.consume();
-            } else {
-                break;
+        while self.position < self.input.len() {
+            match self.current_char() {
+                c if c.is_ascii_digit() => {
+                    self.advance();
+                }
+                '.' if !has_decimal => {
+                    has_decimal = true;
+                    self.advance();
+                }
+                '.' => return Err(MathError::InvalidNumber(
+                    "Troppi punti decimali".to_string()
+                )),
+                _ => break,
             }
         }
 
-        if num.is_empty() || num == "." {
-            panic!("Expected number at position {}, found {:?}", self.pos, self.peek());
-        }
-
-        let parsed = num.parse::<f64>().expect("Invalid number format");
-        println!("[parse_number] parsed '{}' as {}", num, parsed);
-        parsed
+        let number_str = &self.input[start..self.position];
+        number_str.parse::<f64>()
+            .map(Token::Number)
+            .map_err(|_| MathError::InvalidNumber(number_str.to_string()))
     }
 
-    fn skip_whitespace(&mut self) {
-        while let Some(c) = self.peek() {
-            if c.is_whitespace() {
-                self.consume();
-            } else {
-                break;
-            }
-        }
+    #[inline]
+    fn current_char(&self) -> char {
+        self.input[self.position..].chars().next().unwrap()
     }
 
-    fn peek(&self) -> Option<char> {
-        self.input.get(self.pos).copied()
-    }
-
-    fn consume(&mut self) {
-        self.pos += 1;
+    #[inline]
+    fn advance(&mut self) {
+        self.position += 1;
     }
 }
 
-fn main() {
-    println!("Inserisci un'espressione che termina con '=' (es: ((8-9.81*3.14)-.12(1*9/2.3)+-5.17)= )");
-    print!("> ");
-    io::stdout().flush().unwrap();
+struct MathExpressionParser {
+    tokens: Vec<Token>,
+    position: usize,
+}
 
-    let mut input = String::new();
-    io::stdin().read_line(&mut input).unwrap();
+impl MathExpressionParser {
+    fn new(tokens: Vec<Token>) -> Self {
+        debug_log!("Creazione nuovo parser con tokens: {:?}", tokens);
+        Self {
+            tokens,
+            position: 0,
+        }
+    }
 
-    let mut parser = Parser::new(&input.trim());
-    let result = parser.parse();
-    println!("Risultato: {}", result);
+    fn evaluate(&mut self) -> MathResult {
+        debug_log!("Inizio valutazione espressione");
+        let result = self.evaluate_expression()?;
+        
+        match self.peek() {
+            Some(&Token::Equals) => {
+                debug_log!("Espressione valutata correttamente: {}", result);
+                Ok(result)
+            }
+            _ => Err(MathError::InvalidExpression("Manca il simbolo =".to_string()))
+        }
+    }
+
+    fn evaluate_expression(&mut self) -> MathResult {
+        debug_log!("Valutazione espressione alla posizione: {}", self.position);
+        let mut result = self.evaluate_term()?;
+
+        while let Some(token) = self.peek() {
+            match *token {
+                Token::Plus => {
+                    self.advance();
+                    let term = self.evaluate_term()?;
+                    debug_log!("Addizione: {} + {}", result, term);
+                    result += term;
+                }
+                Token::Minus => {
+                    self.advance();
+                    let term = self.evaluate_term()?;
+                    debug_log!("Sottrazione: {} - {}", result, term);
+                    result -= term;
+                }
+                _ => break,
+            }
+        }
+        Ok(result)
+    }
+
+    fn evaluate_term(&mut self) -> MathResult {
+        debug_log!("Valutazione termine alla posizione: {}", self.position);
+        let mut result = self.evaluate_factor()?;
+
+        while let Some(token) = self.peek() {
+            match *token {
+                Token::Multiply => {
+                    self.advance();
+                    let factor = self.evaluate_factor()?;
+                    debug_log!("Moltiplicazione: {} * {}", result, factor);
+                    result *= factor;
+                }
+                Token::Divide => {
+                    self.advance();
+                    let factor = self.evaluate_factor()?;
+                    if factor == 0.0 {
+                        return Err(MathError::InvalidExpression(
+                            "Divisione per zero".to_string()
+                        ));
+                    }
+                    debug_log!("Divisione: {} / {}", result, factor);
+                    result /= factor;
+                }
+                _ => break,
+            }
+        }
+        Ok(result)
+    }
+
+    fn evaluate_factor(&mut self) -> MathResult {
+        debug_log!("Valutazione fattore alla posizione: {}", self.position);
+        match self.next() {
+            Some(Token::Number(n)) => Ok(n),
+            Some(Token::Minus) => {
+                let value = self.evaluate_factor()?;
+                debug_log!("Negazione: -{}", value);
+                Ok(-value)
+            }
+            Some(Token::LeftParen) => {
+                let result = self.evaluate_expression()?;
+                match self.next() {
+                    Some(Token::RightParen) => {
+                        debug_log!("Parentesi valutata: ({})", result);
+                        Ok(result)
+                    }
+                    _ => Err(MathError::MissingParenthesis(self.position)),
+                }
+            }
+            _ => Err(MathError::InvalidExpression(
+                "Espressione non valida".to_string()
+            )),
+        }
+    }
+
+    #[inline]
+    fn peek(&self) -> Option<&Token> {
+        self.tokens.get(self.position)
+    }
+
+    #[inline]
+    fn next(&mut self) -> Option<Token> {
+        if self.position < self.tokens.len() {
+            let token = self.tokens[self.position];
+            self.position += 1;
+            Some(token)
+        } else {
+            None
+        }
+    }
+
+    #[inline]
+    fn advance(&mut self) {
+        self.position += 1;
+    }
+}
+
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    #[cfg(debug_assertions)]
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
+
+    let input = "((8-9.81*3.14)-.12*(1*9/2.3)+-5.17)=";
+    debug_log!("Input espressione: {}", input);
+
+    let mut tokenizer = Tokenizer::new(input);
+    let tokens = tokenizer.tokenize()?;
+    let mut parser = MathExpressionParser::new(tokens);
+    
+    match parser.evaluate() {
+        Ok(result) => {
+            println!("Risultato: {:.3}", result);
+            Ok(())
+        }
+        Err(e) => {
+            eprintln!("Errore: {}", e);
+            Err(Box::new(e))
+        }
+    }
 }

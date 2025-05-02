@@ -4,6 +4,8 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+log = "0.4.27"
+env_logger = "0.11.8"
 
 # Configurazioni dei profili di compilazione
 [profile.dev]
