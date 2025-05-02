@@ -1,17 +1,37 @@
 #[allow(unused)]
 use std::io::{self, Write};
-#[allow(unused)]
-use log::{info, debug};
 
 #[cfg(debug_assertions)]
-macro_rules! debug_log {
-    ($($arg:tt)*) => (log::debug!($($arg)*));
-}
+macro_rules! trace_log { ($($arg:tt)*) => { log::trace!($($arg)*); }; }
+
+#[cfg(debug_assertions)]
+macro_rules! debug_log { ($($arg:tt)*) => { log::debug!($($arg)*); }; }
+
+#[cfg(debug_assertions)]
+macro_rules! info_log { ($($arg:tt)*) => { log::info!($($arg)*); }; }
+
+#[cfg(debug_assertions)]
+macro_rules! warn_log { ($($arg:tt)*) => { log::warn!($($arg)*); }; }
+
+#[cfg(debug_assertions)]
+macro_rules! error_log { ($($arg:tt)*) => { log::error!($($arg)*); }; }
 
 #[cfg(not(debug_assertions))]
-macro_rules! debug_log {
-    ($($arg:tt)*) => ();
-}
+macro_rules! trace_log { ($($arg:tt)*) => {}; }
+
+#[cfg(not(debug_assertions))]
+macro_rules! debug_log { ($($arg:tt)*) => {}; }
+
+#[cfg(not(debug_assertions))]
+macro_rules! info_log { ($($arg:tt)*) => {}; }
+
+#[cfg(not(debug_assertions))]
+macro_rules! warn_log { ($($arg:tt)*) => {}; }
+
+#[cfg(not(debug_assertions))]
+macro_rules! error_log { ($($arg:tt)*) => {}; }
+
+
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Token {
@@ -59,10 +79,22 @@ enum MathError {
 impl std::fmt::Display for MathError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            MathError::InvalidNumber(msg) => write!(f, "Numero non valido: {}", msg),
-            MathError::MissingParenthesis(pos) => write!(f, "Parentesi mancante alla posizione {}", pos),
-            MathError::UnexpectedEnd => write!(f, "Espressione terminata inaspettatamente"),
-            MathError::InvalidExpression(msg) => write!(f, "Espressione non valida: {}", msg),
+            MathError::InvalidNumber(msg) => {
+                warn_log!("Numero non valido: {}", msg);
+                write!(f, "Numero non valido: {}", msg)
+            },
+            MathError::MissingParenthesis(pos) => {
+                warn_log!("Parentesi mancante alla posizione {}", pos);
+                write!(f, "Parentesi mancante alla posizione {}", pos)   
+            }
+            MathError::UnexpectedEnd => {
+                error_log!("Espressione terminata inaspettatamente");
+                write!(f, "Espressione terminata inaspettatamente")
+            },
+            MathError::InvalidExpression(msg) => {
+                error_log!("Espressione non valida: {}", msg);
+                write!(f, "Espressione non valida: {}", msg)
+            } 
         }
     }
 }
@@ -78,15 +110,15 @@ struct Tokenizer<'a> {
 
 impl<'a> Tokenizer<'a> {
     fn new(input: &'a str) -> Self {
-        debug_log!("Creazione nuovo tokenizer con input: {}", input);
+        info_log!("Creazione nuovo tokenizer con input: {}", input);
         Self {
             input,
             position: 0,
         }
     }
 
-    fn tokenize(&mut self) -> Result<Vec<Token>, MathError> {
-        debug_log!("Inizio tokenizzazione");
+    fn tokenize(&mut self) -> Result<Vec<Token>, MathError> { 
+        info_log!("Inizio tokenizzazione");
         let mut tokens = Vec::new();
         
         while self.position < self.input.len() {
@@ -97,12 +129,12 @@ impl<'a> Tokenizer<'a> {
                 }
                 c if c.is_ascii_digit() || c == '.' => {
                     let token = self.parse_number()?;
-                    debug_log!("Token numerico trovato: {:?}", token);
+                    trace_log!("Token numerico trovato: {:?}", token);
                     tokens.push(token);
                 }
                 c => {
                     if let Some(token) = Token::from_char(c) {
-                        debug_log!("Token operatore trovato: {:?}", token);
+                        trace_log!("Token operatore trovato: {:?}", token);
                         tokens.push(token);
                         self.advance();
                     } else {
@@ -114,7 +146,7 @@ impl<'a> Tokenizer<'a> {
             }
         }
         
-        debug_log!("Tokenizzazione completata. Tokens: {:?}", tokens);
+        info_log!("Tokenizzazione completata. Tokens: {:?}", tokens);
         Ok(tokens)
     }
 
@@ -162,7 +194,7 @@ struct MathExpressionParser {
 
 impl MathExpressionParser {
     fn new(tokens: Vec<Token>) -> Self {
-        debug_log!("Creazione nuovo parser con tokens: {:?}", tokens);
+        info_log!("Creazione nuovo parser con tokens: {:?}", tokens);
         Self {
             tokens,
             position: 0,
@@ -170,12 +202,12 @@ impl MathExpressionParser {
     }
 
     fn evaluate(&mut self) -> MathResult {
-        debug_log!("Inizio valutazione espressione");
+        info_log!("Inizio valutazione espressione");
         let result = self.evaluate_expression()?;
         
         match self.peek() {
             Some(&Token::Equals) => {
-                debug_log!("Espressione valutata correttamente: {}", result);
+                info_log!("Espressione valutata correttamente: {}", result);
                 Ok(result)
             }
             _ => Err(MathError::InvalidExpression("Manca il simbolo =".to_string()))
@@ -191,13 +223,13 @@ impl MathExpressionParser {
                 Token::Plus => {
                     self.advance();
                     let term = self.evaluate_term()?;
-                    debug_log!("Addizione: {} + {}", result, term);
+                    trace_log!("Addizione: {} + {}", result, term);
                     result += term;
                 }
                 Token::Minus => {
                     self.advance();
                     let term = self.evaluate_term()?;
-                    debug_log!("Sottrazione: {} - {}", result, term);
+                    trace_log!("Sottrazione: {} - {}", result, term);
                     result -= term;
                 }
                 _ => break,
@@ -215,7 +247,7 @@ impl MathExpressionParser {
                 Token::Multiply => {
                     self.advance();
                     let factor = self.evaluate_factor()?;
-                    debug_log!("Moltiplicazione: {} * {}", result, factor);
+                    trace_log!("Moltiplicazione: {} * {}", result, factor);
                     result *= factor;
                 }
                 Token::Divide => {
@@ -226,7 +258,7 @@ impl MathExpressionParser {
                             "Divisione per zero".to_string()
                         ));
                     }
-                    debug_log!("Divisione: {} / {}", result, factor);
+                    trace_log!("Divisione: {} / {}", result, factor);
                     result /= factor;
                 }
                 _ => break,
@@ -241,14 +273,14 @@ impl MathExpressionParser {
             Some(Token::Number(n)) => Ok(n),
             Some(Token::Minus) => {
                 let value = self.evaluate_factor()?;
-                debug_log!("Negazione: -{}", value);
+                trace_log!("Negazione: -{}", value);
                 Ok(-value)
             }
             Some(Token::LeftParen) => {
                 let result = self.evaluate_expression()?;
                 match self.next() {
                     Some(Token::RightParen) => {
-                        debug_log!("Parentesi valutata: ({})", result);
+                        trace_log!("Parentesi valutata: ({})", result);
                         Ok(result)
                     }
                     _ => Err(MathError::MissingParenthesis(self.position)),
@@ -287,7 +319,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
     let input = "((8-9.81*3.14)-.12*(1*9/2.3)+-5.17)=";
-    debug_log!("Input espressione: {}", input);
+    info_log!("Input espressione: {}", input);
 
     let mut tokenizer = Tokenizer::new(input);
     let tokens = tokenizer.tokenize()?;
