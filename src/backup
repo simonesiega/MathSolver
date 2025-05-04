@@ -3,26 +3,35 @@ use std::io::{self, Write};
 
 #[cfg(debug_assertions)]
 macro_rules! trace_log { ($($arg:tt)*) => { log::trace!($($arg)*); }; }
+
 #[cfg(debug_assertions)]
-#[allow(unused)]
 macro_rules! debug_log { ($($arg:tt)*) => { log::debug!($($arg)*); }; }
+
 #[cfg(debug_assertions)]
 macro_rules! info_log { ($($arg:tt)*) => { log::info!($($arg)*); }; }
+
 #[cfg(debug_assertions)]
 macro_rules! warn_log { ($($arg:tt)*) => { log::warn!($($arg)*); }; }
+
 #[cfg(debug_assertions)]
 macro_rules! error_log { ($($arg:tt)*) => { log::error!($($arg)*); }; }
 
 #[cfg(not(debug_assertions))]
 macro_rules! trace_log { ($($arg:tt)*) => {}; }
+
 #[cfg(not(debug_assertions))]
 macro_rules! debug_log { ($($arg:tt)*) => {}; }
+
 #[cfg(not(debug_assertions))]
 macro_rules! info_log { ($($arg:tt)*) => {}; }
+
 #[cfg(not(debug_assertions))]
 macro_rules! warn_log { ($($arg:tt)*) => {}; }
+
 #[cfg(not(debug_assertions))]
 macro_rules! error_log { ($($arg:tt)*) => {}; }
+
+
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 enum Token {
@@ -51,8 +60,8 @@ impl Token {
         }
     }
 
-    #[inline]
     #[allow(unused)]
+    #[inline]
     fn is_operator(&self) -> bool {
         matches!(self, Token::Plus | Token::Minus | Token::Multiply | Token::Divide)
     }
@@ -71,37 +80,40 @@ enum MathError {
 #[allow(unused)]
 enum TokenError {
     InvalidNumber(String),
+    MissingParenthesis(usize),
     UnexpectedEnd,
     InvalidExpression(String),
     InvalidOperator(char),
-    UnmatchedParenthesis { found: char, position: usize },
+    UnmatchedParentheses,
     UnexpectedToken(Token),
     SyntaxError(String),
 }
 
+// Implementazione Display per MathError
 impl std::fmt::Display for MathError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             MathError::DivisionByZero => {
-                error_log!("Errore: divisione per zero");
+                error_log!("Tentativo di divisione per zero");
                 write!(f, "Errore matematico: divisione per zero")
             },
             MathError::OverflowError => {
-                error_log!("Errore: overflow numerico");
-                write!(f, "Errore matematico: overflow numerico")
+                error_log!("Overflow numerico rilevato");
+                write!(f, "Errore matematico: il risultato è troppo grande")
             },
             MathError::UnderflowError => {
-                error_log!("Errore: underflow numerico");
-                write!(f, "Errore matematico: underflow numerico")
+                error_log!("Underflow numerico rilevato");
+                write!(f, "Errore matematico: il risultato è troppo piccolo")
             },
             MathError::ExpressionTooComplex => {
-                error_log!("Errore: espressione troppo complessa");
+                error_log!("Espressione troppo complessa da valutare");
                 write!(f, "Errore: espressione troppo complessa")
             },
         }
     }
 }
 
+// Implementazione Display per TokenError
 impl std::fmt::Display for TokenError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
@@ -109,25 +121,29 @@ impl std::fmt::Display for TokenError {
                 warn_log!("Numero non valido: {}", msg);
                 write!(f, "Numero non valido: {}", msg)
             },
-            TokenError::UnmatchedParenthesis { found, position } => {
-                warn_log!("Parentesi mancante '{}' alla posizione {}", found, position);
-                write!(f, "Errore: mancante '{}' alla posizione {}", found, position)
+            TokenError::MissingParenthesis(pos) => {
+                warn_log!("Parentesi mancante alla posizione {}", pos);
+                write!(f, "Parentesi mancante alla posizione {}", pos)
             },
             TokenError::UnexpectedEnd => {
-                error_log!("Errore: fine espressione inaspettata");
-                write!(f, "Errore: espressione terminata inaspettatamente")
+                error_log!("Espressione terminata inaspettatamente");
+                write!(f, "Espressione terminata inaspettatamente")
             },
             TokenError::InvalidExpression(msg) => {
-                error_log!("Errore: espressione non valida ({})", msg);
-                write!(f, "Errore: espressione non valida - {}", msg)
+                error_log!("Espressione non valida: {}", msg);
+                write!(f, "Espressione non valida: {}", msg)
             },
             TokenError::InvalidOperator(op) => {
-                warn_log!("Operatore non valido: '{}'", op);
-                write!(f, "Errore: operatore non valido '{}'", op)
+                warn_log!("Operatore non valido: {}", op);
+                write!(f, "Operatore non valido: {}", op)
+            },
+            TokenError::UnmatchedParentheses => {
+                warn_log!("Parentesi non bilanciate nell'espressione");
+                write!(f, "Errore di sintassi: parentesi non bilanciate")
             },
             TokenError::UnexpectedToken(token) => {
                 warn_log!("Token inatteso: {:?}", token);
-                write!(f, "Errore: token inatteso {:?}", token)
+                write!(f, "Token inatteso: {:?}", token)
             },
             TokenError::SyntaxError(msg) => {
                 error_log!("Errore di sintassi: {}", msg);
@@ -140,21 +156,23 @@ impl std::fmt::Display for TokenError {
 impl std::error::Error for MathError {}
 impl std::error::Error for TokenError {}
 
-#[derive(Debug, PartialEq)]
+// Definizione di un tipo Result personalizzato che può gestire entrambi i tipi di errore
+#[derive(Debug)]
+#[derive(PartialEq)]
 enum CalcError {
     Math(MathError),
     Token(TokenError),
 }
 
 impl From<MathError> for CalcError {
-    fn from(e: MathError) -> Self {
-        CalcError::Math(e)
+    fn from(error: MathError) -> Self {
+        CalcError::Math(error)
     }
 }
 
 impl From<TokenError> for CalcError {
-    fn from(e: TokenError) -> Self {
-        CalcError::Token(e)
+    fn from(error: TokenError) -> Self {
+        CalcError::Token(error)
     }
 }
 
@@ -162,12 +180,21 @@ impl std::fmt::Display for CalcError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             CalcError::Math(e) => write!(f, "Errore matematico: {}", e),
-            CalcError::Token(e) => write!(f, "Errore di parsing: {}", e),
+            CalcError::Token(e) => write!(f, "Errore di tokenizzazione: {}", e),
         }
     }
 }
 
-impl std::error::Error for CalcError {}
+// Implementazione Error per CalcError
+impl std::error::Error for CalcError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            CalcError::Math(e) => Some(e),
+            CalcError::Token(e) => Some(e),
+        }
+    }
+}
+
 
 type CalcResult = Result<f64, CalcError>;
 
@@ -178,36 +205,43 @@ struct Tokenizer<'a> {
 
 impl<'a> Tokenizer<'a> {
     fn new(input: &'a str) -> Self {
-        info_log!("Tokenizer creato. Input: '{}'", input);
-        Self { input, position: 0 }
+        info_log!("Creazione nuovo tokenizer con input: {}", input);
+        Self {
+            input,
+            position: 0,
+        }
     }
 
     fn tokenize(&mut self) -> Result<Vec<Token>, TokenError> {
-        info_log!("Avvio tokenizzazione");
+        info_log!("Inizio tokenizzazione");
         let mut tokens = Vec::new();
 
         while self.position < self.input.len() {
             let c = self.current_char();
             match c {
-                c if c.is_whitespace() => self.advance(),
+                c if c.is_whitespace() => {
+                    self.advance();
+                }
                 c if c.is_ascii_digit() || c == '.' => {
                     let token = self.parse_number()?;
-                    trace_log!("Token numero trovato: {:?}", token);
+                    trace_log!("Token numerico trovato: {:?}", token);
                     tokens.push(token);
                 }
                 c => {
                     if let Some(token) = Token::from_char(c) {
-                        trace_log!("Token simbolo trovato: {:?}", token);
+                        trace_log!("Token operatore trovato: {:?}", token);
                         tokens.push(token);
                         self.advance();
-                    } else {
+                    }
+                    else {
                         return Err(TokenError::InvalidOperator(c));
                     }
                 }
             }
-        }
 
-        info_log!("Tokenizzazione completata: {:?}", tokens);
+        }
+        
+        info_log!("Tokenizzazione completata. Tokens: {:?}", tokens);
         Ok(tokens)
     }
 
@@ -217,27 +251,33 @@ impl<'a> Tokenizer<'a> {
 
         while self.position < self.input.len() {
             match self.current_char() {
-                c if c.is_ascii_digit() => self.advance(),
+                c if c.is_ascii_digit() => {
+                    self.advance();
+                }
                 '.' if !has_decimal => {
                     has_decimal = true;
                     self.advance();
                 }
-                '.' => return Err(TokenError::InvalidNumber("Numero con più punti decimali".into())),
+                '.' => return Err(TokenError::InvalidNumber(
+                    "Troppi punti decimali".to_string()
+                )),
                 _ => break,
             }
         }
 
+
         let number_str = &self.input[start..self.position];
-        match number_str.parse::<f64>() {
-            Ok(n) => Ok(Token::Number(n)),
-            Err(_) => Err(TokenError::InvalidNumber(number_str.to_string())),
-        }
+        number_str.parse::<f64>()
+            .map(Token::Number)
+            .map_err(|_| TokenError::InvalidNumber(number_str.to_string()))
     }
 
+    #[inline]
     fn current_char(&self) -> char {
         self.input[self.position..].chars().next().unwrap()
     }
 
+    #[inline]
     fn advance(&mut self) {
         self.position += 1;
     }
@@ -250,45 +290,55 @@ struct MathExpressionParser {
 
 impl MathExpressionParser {
     fn new(tokens: Vec<Token>) -> Self {
-        info_log!("Parser inizializzato con tokens: {:?}", tokens);
-        Self { tokens, position: 0 }
+        info_log!("Creazione nuovo parser con tokens: {:?}", tokens);
+        Self {
+            tokens,
+            position: 0,
+        }
+    }
+
+    #[inline]
+    fn check_overflow(&self, result: f64) -> Result<f64, MathError> {
+        if result.is_infinite() {
+            Err(MathError::OverflowError)
+        } else if result.is_subnormal() {
+            Err(MathError::UnderflowError)
+        } else {
+            Ok(result)
+        }
     }
 
     fn evaluate(&mut self) -> CalcResult {
-        info_log!("Inizio valutazione");
+        info_log!("Inizio valutazione espressione");
         let result = self.evaluate_expression()?;
 
         match self.peek() {
             Some(&Token::Equals) => {
-                info_log!("Valutazione completata con successo");
+                info_log!("Espressione valutata correttamente: {}", result);
                 Ok(result)
-            },
-            Some(token) => {
-                error_log!("Token inatteso dopo valutazione: {:?}", token);
-                Err(TokenError::UnexpectedToken(*token).into())
-            },
-            None => {
-                error_log!("Espressione incompleta alla fine");
-                Err(TokenError::UnexpectedEnd.into())
             }
+            Some(token) => Err(TokenError::UnexpectedToken(*token).into()),
+            None => Err(TokenError::UnexpectedEnd.into()),
         }
     }
 
     fn evaluate_expression(&mut self) -> CalcResult {
+        debug_log!("Valutazione espressione alla posizione: {}", self.position);
         let mut result = self.evaluate_term()?;
+
         while let Some(token) = self.peek() {
             match *token {
                 Token::Plus => {
                     self.advance();
-                    let rhs = self.evaluate_term()?;
-                    trace_log!("Operazione: {} + {}", result, rhs);
-                    result = self.check_overflow(result + rhs)?;
+                    let term = self.evaluate_term()?;
+                    trace_log!("Addizione: {} + {}", result, term);
+                    result = self.check_overflow(result + term).map_err(CalcError::Math)?;
                 }
                 Token::Minus => {
                     self.advance();
-                    let rhs = self.evaluate_term()?;
-                    trace_log!("Operazione: {} - {}", result, rhs);
-                    result = self.check_overflow(result - rhs)?;
+                    let term = self.evaluate_term()?;
+                    trace_log!("Sottrazione: {} - {}", result, term);
+                    result = self.check_overflow(result - term).map_err(CalcError::Math)?;
                 }
                 _ => break,
             }
@@ -306,7 +356,7 @@ impl MathExpressionParser {
                     self.advance();
                     let factor = self.evaluate_factor()?;
                     trace_log!("Moltiplicazione: {} * {}", result, factor);
-                    result = self.check_overflow(result * factor)?;
+                    result = self.check_overflow(result * factor).map_err(CalcError::Math)?;
                 }
                 Token::Divide => {
                     self.advance();
@@ -317,12 +367,7 @@ impl MathExpressionParser {
                     }
 
                     trace_log!("Divisione: {} / {}", result, factor);
-                    result = self.check_overflow(result / factor)?;
-                }
-                Token::Number(_) | Token::LeftParen => {
-                    let factor = self.evaluate_factor()?;
-                    trace_log!("Moltiplicazione implicita: {} * {}", result, factor);
-                    result = self.check_overflow(result * factor)?;
+                    result = self.check_overflow(result / factor).map_err(CalcError::Math)?;
                 }
                 _ => break,
             }
@@ -330,59 +375,47 @@ impl MathExpressionParser {
         Ok(result)
     }
 
-
     fn evaluate_factor(&mut self) -> CalcResult {
+        debug_log!("Valutazione fattore alla posizione: {}", self.position);
         match self.next() {
             Some(Token::Number(n)) => Ok(n),
             Some(Token::Minus) => {
-                let val = self.evaluate_factor()?;
-                trace_log!("Negazione di {}", val);
-                Ok(-val)
-            },
+                let value = self.evaluate_factor()?;
+                trace_log!("Negazione: -{}", value);
+                Ok(-value)
+            }
             Some(Token::LeftParen) => {
                 let result = self.evaluate_expression()?;
                 match self.next() {
-                    Some(Token::RightParen) => Ok(result),
-                    Some(tok) => {
-                        error_log!("Token inatteso invece di ')': {:?}", tok);
-                        Err(TokenError::UnmatchedParenthesis { found: ')', position: self.position }.into())
-                    },
-                    None => Err(TokenError::UnmatchedParenthesis { found: '(', position: self.position }.into()),
+                    Some(Token::RightParen) => {
+                        trace_log!("Parentesi valutata: ({})", result);
+                        Ok(result)
+                    }
+                    _ => Err(TokenError::MissingParenthesis(self.position).into()),
                 }
-            },
-            Some(Token::RightParen) => {
-                error_log!("Parentesi chiusa senza apertura");
-                Err(TokenError::UnmatchedParenthesis { found: ')', position: self.position }.into())
-            },
-            token => {
-                error_log!("Fattore non valido trovato: {:?}", token);
-                Err(TokenError::InvalidExpression("Espressione non valida".into()).into())
             }
+            _ => Err(TokenError::InvalidExpression("Espressione non valida".to_string()).into()),
         }
     }
 
-    fn check_overflow(&self, val: f64) -> Result<f64, CalcError> {
-        if val.is_infinite() {
-            Err(MathError::OverflowError.into())
-        } else if val.is_subnormal() {
-            Err(MathError::UnderflowError.into())
-        } else {
-            Ok(val)
-        }
-    }
 
+    #[inline]
     fn peek(&self) -> Option<&Token> {
         self.tokens.get(self.position)
     }
 
+    #[inline]
     fn next(&mut self) -> Option<Token> {
-        let token = self.tokens.get(self.position).copied();
-        if token.is_some() {
+        if self.position < self.tokens.len() {
+            let token = self.tokens[self.position];
             self.position += 1;
+            Some(token)
+        } else {
+            None
         }
-        token
     }
 
+    #[inline]
     fn advance(&mut self) {
         self.position += 1;
     }
@@ -391,6 +424,40 @@ impl MathExpressionParser {
 #[cfg(test)]
 mod tests {
     use super::*;
+    
+    #[test]
+    fn test_division_by_zero() {
+        let expression = "((8-9.81*3.14)-.12*(1*9/2.3)+-5.17) / 0=";
+        let mut tokenizer = Tokenizer::new(expression);
+        let tokens = tokenizer.tokenize().unwrap();
+        let mut parser = MathExpressionParser::new(tokens);
+        println!("{:?}", parser.evaluate());
+    }
+    
+    #[test]
+    fn test_invalid_number_multiple_dots() {
+        let expression = "1..2 + 3";
+        let mut tokenizer = Tokenizer::new(expression);
+        println!("{:?}", tokenizer.tokenize());
+    }
+
+    #[test]
+    fn test_unexpected_end() {
+        let expression = "5 + (3 * 2";
+        let mut tokenizer = Tokenizer::new(expression);
+        let tokens = tokenizer.tokenize().unwrap();
+        let mut parser = MathExpressionParser::new(tokens);
+        println!("{:?}", parser.evaluate());
+    }
+
+    #[test]
+    fn test_invalid_expression() {
+        let expression = "+ 5 =";
+        let mut tokenizer = Tokenizer::new(expression);
+        let tokens = tokenizer.tokenize().unwrap();
+        let mut parser = MathExpressionParser::new(tokens);
+        println!("{:?}", parser.evaluate());
+    }
 
     #[test]
     fn test_unmatched_parentheses_simulated() {
@@ -401,43 +468,38 @@ mod tests {
         let mut parser = MathExpressionParser::new(tokens);
         println!("{:?}", parser.evaluate());
     }
+
+    #[test]
+    fn test_unexpected_token() {
+        let expression = "1 + * 2 =";
+        let mut tokenizer = Tokenizer::new(expression);
+        let tokens = tokenizer.tokenize().unwrap();
+        let mut parser = MathExpressionParser::new(tokens);
+        println!("{:?}", parser.evaluate());
+    }
 }
+
+
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
-    let input = "((1+2 =";
+    let input = "((8-9.81*3.14)-.12*(1*9/2.3)+-5.17) / 0=";
     info_log!("Input espressione: {}", input);
 
     let mut tokenizer = Tokenizer::new(input);
-
-    let result = match tokenizer.tokenize() {
-        Ok(tokens) => {
-            let mut parser = MathExpressionParser::new(tokens);
-            parser.evaluate()
-        }
-        Err(e) => Err(CalcError::Token(e))
-    };
-
-    match result {
-        Ok(value) => {
-            println!("Risultato: {:.3}", value);
+    let tokens = tokenizer.tokenize()?;
+    let mut parser = MathExpressionParser::new(tokens);
+    
+    match parser.evaluate() {
+        Ok(result) => {
+            println!("Risultato: {:.3}", result);
             Ok(())
         }
         Err(e) => {
-            println!("Errore: {}", e);  
-            match e {
-                CalcError::Math(math_err) => {
-                    error_log!("Errore matematico: {}", math_err);
-                    Err(Box::new(math_err))
-                }
-                CalcError::Token(token_err) => {
-                    error_log!("Errore di tokenizzazione: {}", token_err);
-                    Err(Box::new(token_err))
-                }
-            }
+            println!("Errore: {}", e);
+            Err(Box::new(e))
         }
     }
 }
-
