@@ -3,44 +3,54 @@ Grammatica utilizzata per la rappresentazione e il parsing di espressioni aritme
 Questa grammatica definisce le regole per la sintassi di espressioni aritmetiche che supportano:
 - Numeri decimali con segno
 - Operazioni binarie: somma, sottrazione, moltiplicazione, divisione
-- Operazioni annidate tramite parentesi
-- Moltiplicazione implicita (es. 2(3+4) è interpretato come 2 * (3+4))
+- Moltiplicazione implicita (es. 2(3+4) → 2 * (3+4))
+- Potenze (a^b) e radici ennesime (a$b)
+- Parentesi annidate
 
 ========================
 GRAMMATICA FORMALE (CFG)
 ========================
 
-F → E "="
+F  → E "="
 
-E → P
-   | E "+" P
-   | E "−" P
+E  → P E'
+E' → "+" P E'
+    | "−" P E'
+    | ε
 
-P → T
-   | P "*" T
-   | P "/" T
-   | P T
+P  → U P'
+P' → "*" U P'
+    | "/" U P'
+    | U P'
+    | ε
 
-T → "−" T
-   | unsigned number
-   | "(" E ")"
+U  → B U'
+U' → "^" U
+    | "$" U
+    | ε
+
+B  → "−" B
+    | unsigned number
+    | "(" E ")"
 
 ========================
 DESCRIZIONE DEI SIMBOLI
 ========================
 
-- F (Formula): espressione completa che deve terminare con "="
-  Esempio: (2 + 3) * 4 =
+F (Formula): espressione aritmetica completa, che deve terminare con il simbolo "="
+Esempio: (2 + 3) * 4 =
 
-- E (Espressione): espressione aritmetica generale
-  → Include somme, sottrazioni e prodotti (tramite P)
+E (Espressione): gestisce somma e sottrazione tra blocchi (+, −), con precedenza minore
+→ Combinazione ricorsiva di termini P
 
-- P (Prodotto): prodotto o divisione tra termini, o moltiplicazione implicita
-  → Ad esempio: 2 * 3 oppure 2(3+4)
+P (Prodotto): gestisce moltiplicazione (*), divisione (/) e moltiplicazione implicita
+→ Esempio: 2 * 3, 2(3+1), (1+2)(4-1)
 
-- T (Termine): numero con segno, numero decimale, o espressione tra parentesi
+U (Unità): gestisce le potenze (^) e le radici ennesime ($), con associatività a destra
+→ Esempio: 2^3, 27$3
 
-- number: un numero in formato double, ad esempio 3.14, .12
+B (Base): rappresenta un valore elementare
+→ Può essere un numero (unsigned number), una negazione (−), o un’espressione tra parentesi
 
 ========================
 ESEMPI VALIDI
@@ -53,6 +63,9 @@ Espressione                                             → Interpretazione
 2(3 + 1) =                                             → 2 * (3 + 1) = 8
 (1 + 2)(3 + 4) =                                       → 3 * 7 = 21
 (.12)(1*9/2.3) =                                       → 0.12 * (9 / 2.3)
+2^3 =                                                  → 8
+27$3 =                                                 → 3 (radice cubica di 27)
+4^2 $ 2 =                                              → 4
 
 ((8 - 9.81 * 3.14) - .12(1*9/2.3) + -5.17) =           Raggruppa i casi precedentemente citati 
                                   
@@ -66,11 +79,14 @@ Espressione           → Errore
 2 + =                 → Manca termine dopo +
 2 * (3 + 4            → Parentesi non chiusa
 5 5 =                 → Ambiguo: due numeri consecutivi
+2 ^ =                 → Manca esponente
+27 $ =                → Manca indice radice
 
 ========================
 NOTE FINALI
 ========================
 
 - La moltiplicazione implicita è trattata solo nel contesto del prodotto P.
+- Le potenze (^) e radici ($) sono gestite tramite U, con precedenza maggiore rispetto ai prodotti.
 - Il simbolo '=' serve come delimitatore di fine input e non fa parte del calcolo.
-- L’estensione a potenze, funzioni o costanti è possibile con produzioni aggiuntive.
+- L’estensione a funzioni(sin, log) o costanti(e) è possibile con produzioni aggiuntive.
