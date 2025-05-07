@@ -11,22 +11,37 @@ Questa grammatica definisce le regole per la sintassi di espressioni aritmetiche
 GRAMMATICA FORMALE (CFG)
 ========================
 
-F  → E "="
+- evaluate
+F  → E "="                 
 
+- evaluate_e
 E  → P E'
-E' → "+" P E'
+                   
+- evaluate_e_prime
+E' → "+" P E'               
     | "−" P E'
     | ε
 
+- evaluate_p
 P  → U P'
-P' → "*" U P'
+                   
+- evaluate_p_prime
+P' → "*" U P'               
     | "/" U P'
-    | U P'
+    | ImplicitMult U P'      - solo in alcuni casi
     | ε
 
-U  → B U'
-U' → "^" U
-    | "$" U
+ImplicitMult → 
+    | if_last_token_is_closing_paren_and_next_is_open_paren
+    | if_last_token_is_number_and_next_is_open_paren
+    | if_last_token_is_closing_paren_and_next_is_number
+
+- evaluate_u
+U  → B U'   
+                
+- evaluate_u_prime
+U' → "^" U                  - evaluate_exponentiation
+    | "$" U                 - evaluate_root
     | ε
 
 B  → "−" B

@@ -10,15 +10,19 @@ use std::io::{self, Write};
 /// riducendo overhead del logging in produzione.
 // MACRO ATTIVE IN MODALITÀ DEBUG //
 #[cfg(debug_assertions)]
+#[allow(unused)]
 macro_rules! trace_log { ($($arg:tt)*) => { log::trace!($($arg)*); }; }
 #[cfg(debug_assertions)]
 #[allow(unused)]
 macro_rules! debug_log { ($($arg:tt)*) => { log::debug!($($arg)*); }; }
 #[cfg(debug_assertions)]
+#[allow(unused)]
 macro_rules! info_log { ($($arg:tt)*) => { log::info!($($arg)*); }; }
 #[cfg(debug_assertions)]
+#[allow(unused)]
 macro_rules! warn_log { ($($arg:tt)*) => { log::warn!($($arg)*); }; }
 #[cfg(debug_assertions)]
+#[allow(unused)]
 macro_rules! error_log { ($($arg:tt)*) => { log::error!($($arg)*); }; }
 
 // VERSIONI NO-OP IN MODALITÀ RELEASE 
@@ -39,6 +43,7 @@ macro_rules! error_log { ($($arg:tt)*) => {}; }
 /// Ogni variante corrisponde a un tipo di simbolo nel linguaggio aritmetico:
 /// - `Number(f64)`: un numero decimale.
 /// - `Plus`, `Minus`, `Multiply`, `Divide`: operatori aritmetici.
+/// - `Caret`, 'Dollar': simboli di potenza e radice.
 /// - `LeftParen`, `RightParen`: parentesi tonde.
 /// - `Equals`: simbolo di fine espressione o assegnazione.
 ///
@@ -61,8 +66,14 @@ enum Token {
     Multiply,  
     
     /// Operatore di divisione: '/'
-    Divide,  
-    
+    Divide,
+
+    /// Simbolo di potenza: '^'
+    Caret,
+
+    /// Simbolo di radice n-esima: '$'
+    Dollar,
+
     /// Parentesi aperta: '('
     LeftParen, 
     
@@ -70,7 +81,7 @@ enum Token {
     RightParen,  
     
     /// Simbolo di fine espressione: '='
-    Equals,      
+    Equals,
 }
 
 impl Token {
@@ -94,6 +105,8 @@ impl Token {
             '-' => Some(Token::Minus),
             '*' => Some(Token::Multiply),
             '/' => Some(Token::Divide),
+            '^' => Some(Token::Caret),
+            '$' => Some(Token::Dollar),
             '(' => Some(Token::LeftParen),
             ')' => Some(Token::RightParen),
             '=' => Some(Token::Equals),
@@ -138,6 +151,18 @@ enum MathError {
     /// L'espressione contiene troppi elementi o nidificazioni.
     // Attualmente non implementato
     ExpressionTooComplex,
+
+    /// Potenza con base o esponente non valido
+    InvalidExponentiation { base: f64, exponent: f64, },
+
+    /// Radice di numero negativo con indice frazionario.
+    NegativeRoot { base: f64, root: f64, },
+
+    /// Radice con indice pari di numero negativo (non definita nei reali).
+    EvenRootOfNegative { base: f64, root: f64, },
+
+    /// Radice con base o indice non valido
+    InvalidRoot { base: f64, root: f64, },
 }
 
 /// Tipi di errore che possono verificarsi durante la fase di tokenizzazione o parsing.
@@ -198,6 +223,22 @@ impl std::fmt::Display for MathError {
                 error_log!("Errore: espressione troppo complessa");
                 write!(f, "Errore: espressione troppo complessa")
             },
+            MathError::InvalidExponentiation { base, exponent } => {
+                error_log!("Errore: potenza non valida (base: {}, esponente: {})", base, exponent);
+                write!(f, "Errore: potenza non valida ({} ^ {})", base, exponent)
+            },
+            MathError::NegativeRoot { base, root } => {
+                error_log!("Errore: radice con indice frazionario di numero negativo (base: {}, indice: {})", base, root);
+                write!(f, "Errore: radice frazionaria di numero negativo ({} $ {})", base, root)
+            },
+            MathError::EvenRootOfNegative { base, root } => {
+                error_log!("Errore: radice con indice pari di numero negativo (base: {}, indice: {})", base, root);
+                write!(f, "Errore: radice con indice pari di numero negativo ({} $ {})", base, root)
+            },
+            MathError::InvalidRoot { base, root } => {
+                error_log!("Errore: potenza non valida (base: {}, esponente: {})", base, root);
+                write!(f, "Errore: potenza non valida ({} ^ {})", base, root)
+            },
         }
     }
 }
@@ -213,11 +254,11 @@ impl std::fmt::Display for TokenError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
             TokenError::InvalidNumber(msg) => {
-                warn_log!("Numero non valido: {}", msg);
+                error_log!("Numero non valido: {}", msg);
                 write!(f, "Numero non valido: {}", msg)
             },
             TokenError::UnmatchedParenthesis { found, position } => {
-                warn_log!("Parentesi mancante '{}' alla posizione {}", found, position);
+                error_log!("Parentesi mancante '{}' alla posizione {}", found, position);
                 write!(f, "Errore: mancante '{}' alla posizione {}", found, position)
             },
             TokenError::UnexpectedEnd => {
@@ -229,11 +270,11 @@ impl std::fmt::Display for TokenError {
                 write!(f, "Errore: espressione non valida - {}", msg)
             },
             TokenError::InvalidOperator(op) => {
-                warn_log!("Operatore non valido: '{}'", op);
+                error_log!("Operatore non valido: '{}'", op);
                 write!(f, "Errore: operatore non valido '{}'", op)
             },
             TokenError::UnexpectedToken(token) => {
-                warn_log!("Token inatteso: {:?}", token);
+                error_log!("Token inatteso: {:?}", token);
                 write!(f, "Errore: token inatteso {:?}", token)
             },
             TokenError::SyntaxError(msg) => {
@@ -361,7 +402,7 @@ impl<'a> Tokenizer<'a> {
                 // Gestisce sequenze numeriche, inclusi decimali.
                 c if c.is_ascii_digit() || c == '.' => {
                     let token = self.parse_number()?;
-                    trace_log!("Token numero trovato: {:?}", token);
+                    info_log!("Token numero trovato: {:?}", token);
                     tokens.push(token);
                 }
 
@@ -369,7 +410,7 @@ impl<'a> Tokenizer<'a> {
                 c => {
                     // Gestione token riconosciuti.
                     if let Some(token) = Token::from_char(c) {
-                        trace_log!("Token simbolo trovato: {:?}", token);
+                        info_log!("Token simbolo trovato: {:?}", token);
                         tokens.push(token);
                         self.advance();
                     } 
@@ -502,7 +543,7 @@ impl MathExpressionParser {
     /// - I log interni aiutano a tracciare lo stato della valutazione.
     fn evaluate(&mut self) -> CalcResult {
         info_log!("Inizio valutazione");
-        let result = self.evaluate_expression()?; // Analizza e valuta un'espressione intera.
+        let result = self.evaluate_e()?; // Analizza e valuta un'espressione intera.
 
         // Controlla se dopo l'espressione è presente un simbolo '=' (atteso).
         match self.peek() {
@@ -523,193 +564,437 @@ impl MathExpressionParser {
         }
     }
 
-    /// Valuta un'espressione aritmetica composta da termini con operazioni di somma e sottrazione.
+    /// Valuta un'espressione aritmetica che può contenere somme e sottrazioni tra termini.
     ///
     /// Questo metodo implementa la regola grammaticale:
     /// ```
-    /// E → P
-    ///    | E "+" P
-    ///    | E "−" P
+    /// E → P E'
     /// ```
     ///
     /// # Comportamento
-    /// - Valuta un primo termine tramite `evaluate_term()`.
-    /// - Iterativamente gestisce operatori di somma (`+`) e sottrazione (`−`) tra termini successivi.
-    /// - Ogni operazione aritmetica è verificata tramite `check_overflow` per gestire eventuali errori numerici.
-    ///
-    /// La valutazione termina quando non sono più presenti operatori `+` o `-` oppure quando l'input è stato completamente processato.
+    /// - Valuta un primo termine `P` tramite `evaluate_p()`.
+    /// - Successivamente, passa il risultato parziale a `evaluate_e_prime()` per gestire eventuali
+    ///   somme o sottrazioni definite nella produzione `E'`.
+    /// - L'espressione termina quando non ci sono più operatori `+` o `−`.
     ///
     /// # Ritorna
-    /// - `Ok(f64)` con il risultato parziale o completo dell’espressione.
-    /// - `Err(CalcError)` in caso di errore sintattico (es. operatore mancante o inatteso) o semantico.
+    /// - `Ok(f64)` con il risultato dell’espressione valutata.
+    /// - `Err(CalcError)` in caso di errore sintattico o semantico.
     ///
-    /// # Note
-    /// - La precedenza degli operatori è rispettata grazie alla separazione delle regole tra `E`, `P` e `T`.
-    /// - Gli operatori non riconosciuti (`*`, `/`, implicita, ecc.) sono gestiti da livelli grammaticali inferiori e causano l’uscita anticipata dal ciclo.
-    fn evaluate_expression(&mut self) -> CalcResult {
-        let mut result = self.evaluate_term()?; // Valutazione del primo termine.
-
-        // Gestione degli operatori '+' e '-' tra i termini.
-        while let Some(token) = self.peek() {
-            match *token {
-                
-                Token::Plus => {
-                    self.advance();
-                    let rhs = self.evaluate_term()?; // Valuta il termine a destra dell'operatore.
-                    trace_log!("Operazione: {} + {}", result, rhs);
-                    result = self.check_overflow(result + rhs)?; // Verifica overflow e calcola il risultato.
-                }
-                
-                Token::Minus => {
-                    self.advance();
-                    let rhs = self.evaluate_term()?; // Valuta il termine a destra dell'operatore.
-                    trace_log!("Operazione: {} - {}", result, rhs);
-                    result = self.check_overflow(result - rhs)?; // Verifica overflow e calcola il risultato.
-                }
-                
-                _ => break, // Se non è un operatore di somma o sottrazione, esce dal ciclo.
-            }
-        }
-
-        // Restituisce il risultato finale dell'espressione.
-        Ok(result)
+    /// # Esempi
+    /// ```
+    /// let mut parser = Parser::new("3 + 2 =");
+    /// assert_eq!(parser.evaluate_e().unwrap(), 5.0);
+    /// ```
+    ///
+    /// ```
+    /// let mut parser = Parser::new("7 - 4 =");
+    /// assert_eq!(parser.evaluate_e().unwrap(), 3.0);
+    /// ```
+    fn evaluate_e(&mut self) -> CalcResult {
+        let result = self.evaluate_p()?;
+        self.evaluate_e_prime(result)
     }
 
-    /// Valuta un termine aritmetico, che può includere moltiplicazioni esplicite (`*`), divisioni (`/`)
-    /// o moltiplicazioni implicite (es. `2(3 + 4)`), partendo dalla posizione corrente.
+    /// Valuta la parte ricorsiva di un'espressione (`E'`) che gestisce somme e sottrazioni.
     ///
     /// Questo metodo implementa la regola grammaticale:
-    ///
     /// ```
-    /// P → T
-    ///    | P "*" T
-    ///    | P "/" T
-    ///    | P T
+    /// E' → "+" P E'
+    ///     | "−" P E'
+    ///     | ε
+    /// ```
+    ///
+    /// # Parametri
+    /// - `acc`: Il valore accumulato finora, risultato della valutazione di `P` in `E → P E'`.
+    ///
+    /// # Comportamento
+    /// - In un ciclo, controlla se il token corrente è un operatore `+` o `−`.
+    /// - Se è `+`, valuta il termine successivo `P` e lo somma al valore accumulato.
+    /// - Se è `−`, valuta il termine successivo `P` e lo sottrae al valore accumulato.
+    /// - In entrambi i casi, controlla eventuali overflow numerici tramite `check_overflow()`.
+    /// - Se il prossimo token non è un operatore, la funzione termina e restituisce il valore accumulato.
+    ///
+    /// # Ritorna
+    /// - `Ok(f64)` con il risultato aggiornato dell’espressione.
+    /// - `Err(CalcError)` in caso di errori aritmetici (es. overflow).
+    ///
+    /// # Esempio
+    /// ```
+    /// let mut parser = Parser::new("5 + 3 - 2 =");
+    /// assert_eq!(parser.evaluate_e_prime(5.0).unwrap(), 6.0);
+    /// ```
+    fn evaluate_e_prime(&mut self, mut acc: f64) -> CalcResult {
+        loop {
+            match self.peek() {
+                // In entrambi i casi consuma il token
+                Some(Token::Plus) => {
+                    self.advance();
+                    let rhs = self.evaluate_p()?; // Right-Hand Side
+                    
+                    info_log!("Operazione: {} + {}", acc, rhs);
+                    acc = self.check_overflow(acc + rhs)?;
+                }
+                Some(Token::Minus) => {
+                    self.advance();
+                    let rhs = self.evaluate_p()?; // Right-Hand Side
+                    
+                    info_log!("Operazione: {} - {}", acc, rhs);
+                    acc = self.check_overflow(acc - rhs)?;
+                }
+                _ => break,
+            }
+        }
+        // Restituisce il valore accumulato
+        Ok(acc)
+    }
+
+    /// Valuta una parte dell'espressione che rappresenta un prodotto, che può includere:
+    /// - Operazioni esplicite di moltiplicazione (`*`) e divisione (`/`)
+    /// - Moltiplicazioni implicite (es. `2(3+4)` → `2 * (3+4)`)
+    ///
+    /// Questo metodo implementa la regola grammaticale:
+    /// ```
+    /// P → U P'
     /// ```
     ///
     /// # Comportamento
-    /// - Valuta il primo fattore tramite `evaluate_factor()`.
-    /// - Gestisce in modo iterativo gli operatori di moltiplicazione (`*`), divisione (`/`)
-    ///   e la moltiplicazione implicita (quando un numero o una parentesi segue direttamente un termine).
-    /// - Ogni operazione è verificata tramite `check_overflow` per prevenire errori numerici.
-    /// - Se viene rilevata una divisione per zero, viene generato un errore specifico.
+    /// - Chiama `evaluate_u()` per valutare la prima unità dell'espressione.
+    /// - Passa il risultato a `evaluate_p_prime()` per gestire le operazioni successive.
     ///
     /// # Ritorna
-    /// - `Ok(f64)` con il risultato del termine valutato.
-    /// - `Err(CalcError)` in caso di errore sintattico, divisione per zero o overflow aritmetico.
+    /// - `Ok(f64)` con il valore del prodotto calcolato.
+    /// - `Err(CalcError)` in caso di errore matematico o sintattico.
     ///
-    /// # Note
-    /// - La moltiplicazione implicita è gestita riconoscendo una sequenza `P T`
-    ///   come `P * T`, dove `T` può essere un numero o un'espressione tra parentesi.
-    /// - Le operazioni terminano appena viene incontrato un token che non corrisponde
-    ///   a un operatore di prodotto o a un fattore immediatamente moltiplicabile.
-    fn evaluate_term(&mut self) -> CalcResult {
-        debug_log!("Valutazione termine alla posizione: {}", self.position);
-        let mut result = self.evaluate_factor()?; // Valutazione il primo fattore
+    /// # Esempi
+    /// ```
+    /// let mut parser = Parser::new("2 * 3 =");
+    /// assert_eq!(parser.evaluate_p().unwrap(), 6.0);
+    /// ```
+    /// 
+    /// ```
+    /// let mut parser = Parser::new("4(1 + 2) =");
+    /// assert_eq!(parser.evaluate_p().unwrap(), 12.0);  // moltiplicazione implicita
+    /// ```
+    fn evaluate_p(&mut self) -> CalcResult {
+        let result = self.evaluate_u()?;
+        self.evaluate_p_prime(result)
+    }
+
+    /// Valuta le operazioni successive di prodotto, inclusi:
+    /// - Moltiplicazione esplicita (`*`)
+    /// - Divisione (`/`)
+    /// - Moltiplicazione implicita (es. `2(3 + 1)` → `2 * (3 + 1)`)
+    ///
+    /// Questo metodo implementa la regola grammaticale:
+    /// ```
+    /// P' → "*" U P'
+    ///     | "/" U P'
+    ///     | ImplicitMult U P'
+    ///     | ε
+    /// ```
+    ///
+    /// # Comportamento
+    /// - Percorre tutti i token che rappresentano una continuazione di `P`.
+    /// - Per `*` o `/`, valuta la parte a destra (`U`) e applica l'operazione sul valore accumulato.
+    /// - Se trova un numero o una parentesi aperta immediatamente dopo un termine valido (`acc`), applica la regola della *moltiplicazione implicita*.
+    /// - L’arresto avviene al primo token che non corrisponde a una continuazione valida.
+    ///
+    /// # Errori gestiti
+    /// - `MathError::DivisionByZero` se viene tentata una divisione per zero.
+    /// - `MathError::OverflowError` o `MathError::UnderflowError` se il risultato eccede i limiti numerici consentiti.
+    ///
+    /// # Ritorna
+    /// - `Ok(f64)` con il valore aggiornato.
+    /// - `Err(CalcError)` in caso di errore semantico o matematico.
+    ///
+    /// # Esempi
+    /// ```
+    /// let mut parser = Parser::new("4 * 2 =");
+    /// assert_eq!(parser.evaluate_p_prime(4.0).unwrap(), 8.0);
+    /// ```
+    ///
+    /// ```
+    /// let mut parser = Parser::new("5(2 + 1) =");
+    /// assert_eq!(parser.evaluate_p_prime(5.0).unwrap(), 15.0);  // moltiplicazione implicita
+    /// ```
+    fn evaluate_p_prime(&mut self, mut acc: f64) -> CalcResult {
+        loop {
+            match self.peek() {
+                // In tutti i casi consuma il token
+                // Gestione esplicita della moltiplicazione
+                Some(Token::Multiply) => {
+                    self.advance();
+                    let rhs = self.evaluate_u()?; // Right-Hand Side
+                    
+                    info_log!("Moltiplicazione: {} * {}", acc, rhs);
+                    acc = self.check_overflow(acc * rhs)?;
+                }
+                // Gestione esplicita della divisione
+                Some(Token::Divide) => {
+                    self.advance();
+                    let rhs = self.evaluate_u()?; // Right-Hand Side
+                    // n / 0 --> Errore
+                    if rhs == 0.0 { return Err(MathError::DivisionByZero.into()); }
+                    
+                    info_log!("Divisione: {} / {}", acc, rhs);
+                    acc = self.check_overflow(acc / rhs)?;
+                }
+                // Moltiplicazione implicita: es. `2(3 + 4)` o `4 5`
+                Some(Token::Number(_)) | Some(Token::LeftParen) => {
+                    if self.previous_token_is_paren_or_number() && self.can_apply_implicit_multiplication() {
+                        let rhs = self.evaluate_u()?; // Right-Hand Side
+
+                        info_log!("Moltiplicazione implicita: {} * {}", acc, rhs);
+                        acc = self.check_overflow(acc * rhs)?;
+                    } 
+                    else { break; }
+                }
+                _ => break,
+            }
+        }
+        Ok(acc)
+    }
+
+    /// Verifica se il token precedente è un numero o una parentesi chiusa.
+    ///
+    /// Questo metodo è utilizzato per determinare se una moltiplicazione implicita
+    /// può essere applicata. La moltiplicazione implicita avviene, ad esempio,
+    /// in espressioni come `2(3 + 1)` o `4 5`, dove non è presente esplicitamente
+    /// l'operatore `*`.
+    ///
+    /// # Ritorna
+    /// - `true` se il token precedente è `Token::Number(_)` o `Token::RightParen`.
+    /// - `false` altrimenti.
+    fn previous_token_is_paren_or_number(&self) -> bool {
+        match self.tokens.get(self.position.wrapping_sub(1)) {
+            Some(Token::Number(_)) | Some(Token::RightParen) => true,
+            _ => false,
+        }
+    }
+
+    /// Verifica se il token corrente può rappresentare un termine valido
+    /// per una moltiplicazione implicita.
+    ///
+    /// Questo metodo viene tipicamente chiamato subito dopo `previous_token_is_paren_or_number`
+    /// per decidere se applicare una moltiplicazione implicita tra due elementi contigui.
+    ///
+    /// # Ritorna
+    /// - `true` se il token corrente è `Token::Number(_)` o `Token::LeftParen`.
+    /// - `false` altrimenti.
+    fn can_apply_implicit_multiplication(&self) -> bool {
+        match self.peek() {
+            Some(Token::Number(_)) | Some(Token::LeftParen) => true,
+            _ => false,
+        }
+    }
+
+    /// Valuta un'unità dell'espressione aritmetica, che può essere soggetta a esponenti o radici.
+    ///
+    /// Questo metodo implementa la regola grammaticale:
+    /// ```
+    /// U → B U'
+    /// ```
+    ///
+    /// # Comportamento
+    /// - Valuta prima la base tramite `evaluate_b()`.
+    /// - Poi applica eventuali esponenti o radici tramite `evaluate_u_prime(base)`.
+    ///
+    /// # Ritorna
+    /// - `Ok(f64)` con il valore dell'unità calcolata.
+    /// - `Err(CalcError)` in caso di errori sintattici o matematici (come radice di numero negativo o overflow).
+    ///
+    /// # Esempi
+    /// ```
+    /// let mut parser = Parser::new("2 ^ 3 =");
+    /// assert_eq!(parser.evaluate_u().unwrap(), 8.0);
+    ///
+    /// let mut parser = Parser::new("27 $ 3 =");  // Radice cubica
+    /// assert_eq!(parser.evaluate_u().unwrap(), 3.0);
+    /// ```
+    fn evaluate_u(&mut self) -> CalcResult {
+        let base = self.evaluate_b()?;
+        self.evaluate_u_prime(base)
+    }
+
+    /// Valuta gli operatori di potenza o radice applicati alla base già calcolata.
+    ///
+    /// Questo metodo implementa la regola grammaticale:
+    /// ```
+    /// U' → "^" U
+    ///     | "$" U
+    ///     | ε
+    /// ```
+    ///
+    /// # Comportamento
+    /// - Se il token corrente è `^`, valuta ricorsivamente il valore a destra e applica la potenza (`base ^ esponente`).
+    /// - Se il token corrente è `$`, valuta ricorsivamente il valore a destra e applica la radice (`base $ indice` = radice di indice `rhs` di `acc`).
+    /// - In caso di token non compatibile, restituisce il valore della base senza modificarlo (ε).
+    ///
+    /// # Validazioni ed errori
+    /// - Usa `evaluate_exponentiation` per gestire potenze, con validazioni (es. base negativa con esponente frazionario).
+    /// - Usa `evaluate_root` per gestire radici, controllando:
+    ///   - Radice di indice pari su numero negativo → errore `MathError::EvenRootOfNegative`
+    ///   - Indice zero → errore `MathError::DivisionByZero`
+    /// - Qualsiasi valore fuori dai limiti numerici viene gestito tramite `check_overflow`.
+    ///
+    /// # Parametri
+    /// - `acc`: f64 — il valore di partenza su cui applicare l'operatore.
+    ///
+    /// # Ritorna
+    /// - `Ok(f64)` con il risultato dopo l'eventuale applicazione di potenza o radice.
+    /// - `Err(CalcError)` in caso di errore matematico (overflow, radice di numero negativo, ecc.).
+    fn evaluate_u_prime(&mut self, mut acc: f64) -> CalcResult {
+        match self.peek() {
+            // In entrambi i casi consuma il token
+            Some(Token::Caret) => {
+                self.advance();
+                let rhs = self.evaluate_u()?; // Right-Hand Side
+                
+                info_log!("Esponenziale: {} ^ {}", acc, rhs);
+                acc = self.evaluate_exponentiation(acc, rhs)?;
+                Ok(acc)
+            }
+
+            Some(Token::Dollar) => {
+                self.advance();
+                let rhs = self.evaluate_u()?; // Right-Hand Side
+                
+                info_log!("Radice: {} $ {}", acc, rhs);
+                acc = self.evaluate_root(acc, rhs)?;
+                Ok(acc)
+            }
+
+            _ => Ok(acc),
+        }
+    }
+
+    /// Calcola l'esponenziale tra due numeri, ossia `base ^ esponente`.
+    ///
+    /// Questo metodo calcola la potenza della base elevata all'esponente e verifica se il risultato
+    /// è valido (non è `NaN` né infinito). 
+    /// Gestisce anche eventuali overflow o underflow numerici tramite il metodo `check_overflow`.
+    ///
+    /// # Parametri
+    /// - `base`: f64 — la base su cui applicare l'esponenziale.
+    /// - `exponent`: f64 — l'esponente a cui elevare la base.
+    ///
+    /// # Ritorna
+    /// - `Ok(f64)` se il calcolo è valido e il risultato non è fuori dai limiti numerici.
+    /// - `Err(MathError)` in caso di errore, come esponenziali che generano `NaN` o valori infiniti.
+    fn evaluate_exponentiation(&self, base: f64, exponent: f64) -> CalcResult {
+        // Calcola la potenza: base elevato all'esponente
+        let result = base.powf(exponent);
+
+        // Se il risultato è NaN o infinito, restituiamo un errore
+        if result.is_nan() || result.is_infinite() {
+            return Err(MathError::InvalidExponentiation { base, exponent }.into());
+        }
         
-        // Cerca operazioni di moltiplicazione o divisione
-        while let Some(token) = self.peek() {
-            match *token {
-                
-                Token::Multiply => {
-                    self.advance();
-                    let factor = self.evaluate_factor()?; // Valuta il fattore successivo
-                    trace_log!("Moltiplicazione: {} * {}", result, factor);
-                    result = self.check_overflow(result * factor)?; // Moltiplicazione con controllo overflow
-                }
-                
-                Token::Divide => {
-                    self.advance();
-                    let factor = self.evaluate_factor()?; // Valuta il fattore successivo
+        self.check_overflow(result)
+    }
+    
+    /// Calcola la radice di un numero, ossia `base $ root`.
+    ///
+    /// Questo metodo gestisce il calcolo della radice di `base` con indice `root`. 
+    /// Se la base è negativa e la radice non è un intero dispari, restituisce un errore (`MathError::EvenRootOfNegative`).
+    /// Se la base è negativa e la radice è frazionaria, restituisce un errore (`MathError::NegativeRoot`).
+    /// Inoltre, gestisce il caso della divisione per zero nel caso in cui `root` sia uguale a zero.
+    ///
+    /// # Parametri
+    /// - `base`: f64 — la base su cui calcolare la radice.
+    /// - `root`: f64 — l'indice della radice da calcolare.
+    ///
+    /// # Ritorna
+    /// - `Ok(f64)` se il calcolo è valido e il risultato non è fuori dai limiti numerici.
+    /// - `Err(MathError)` in caso di errore, come divisione per zero o radice di un numero negativo con indice pari.
+    fn evaluate_root(&self, base: f64, root: f64) -> CalcResult {
+        // Controlla se la radice è zero, il che porterebbe a divisione per zero
+        if root == 0.0 { return Err(MathError::DivisionByZero.into()); }
 
-                    if factor == 0.0 { return Err(MathError::DivisionByZero.into()); } // Errore di divisione per zero
+        // Gestisce il caso di base negativa
+        if base < 0.0 {
+            
+            // Se la radice è frazionaria, non possiamo calcolare la radice di un numero negativo
+            if root.fract() != 0.0 { return Err(MathError::NegativeRoot { base, root }.into()); }
 
-                    trace_log!("Divisione: {} / {}", result, factor);
-                    result = self.check_overflow(result / factor)?; // Divisione con controllo overflow
-                }
-                
-                Token::Number(_) | Token::LeftParen => {
-                    let factor = self.evaluate_factor()?; // Valuta il fattore successivo (moltiplicazione implicita)
-                    trace_log!("Moltiplicazione implicita: {} * {}", result, factor);
-                    result = self.check_overflow(result * factor)?; // Moltiplicazione implicita con controllo overflow
-                }
-                
-                _ => break, // Se non è un operatore di moltiplicazione o divisione, esce dal ciclo.
-            }
+            // Se la radice è pari e la base è negativa, restituiamo un errore
+            if (root as i64) % 2 == 0 { return Err(MathError::EvenRootOfNegative { base, root }.into()); }
+
+            // Calcola la radice per base negativa
+            let result = -(-base).powf(1.0 / root);
+            return self.check_overflow(result);
         }
-        // Restituisce il risultato del termine
-        Ok(result) 
+
+        // Calcola la radice per base positiva
+        let result = base.powf(1.0 / root);
+        
+        // Se il risultato è NaN o infinito, restituiamo un errore
+        if result.is_nan() || result.is_infinite() { return Err(MathError::InvalidRoot { base, root }.into()); }
+        
+        self.check_overflow(result)
     }
 
-    /// Valuta un fattore dell'espressione aritmetica, che può essere:
+    /// Valuta un "fattore" nell'espressione aritmetica, che può essere:
     /// - Un numero senza segno (es. `3.14`)
+    /// - Un'espressione preceduta da un operatore di negazione (`-`)
     /// - Un'espressione tra parentesi tonde (es. `(2 + 3)`)
-    /// - Un fattore preceduto da un operatore di negazione (`-`)
     ///
     /// Questo metodo implementa la regola grammaticale:
-    ///
     /// ```
-    /// T → "−" T
+    /// B → "−" B
     ///    | unsigned number
     ///    | "(" E ")"
     /// ```
     ///
     /// # Comportamento
-    /// - Se il token corrente è un numero (`Token::Number`), viene restituito direttamente come valore `f64`.
-    /// - Se è un operatore `-`, viene effettuata una chiamata ricorsiva a `evaluate_factor()` e il risultato viene negato.
-    /// - Se è una parentesi aperta `(`, viene valutata un'espressione con `evaluate_expression()` fino a trovare la parentesi chiusa `)`.
-    /// - Se la parentesi di chiusura è mancante o errata, viene restituito un errore di parentesi non corrispondente.
-    /// - Qualsiasi token inatteso viene considerato errore sintattico.
+    /// - Se il token corrente è un numero (`Token::Number`), il valore viene restituito direttamente.
+    /// - Se il token corrente è un operatore di negazione (`Token::Minus`), il fattore successivo viene valutato e il risultato viene negato.
+    /// - Se il token corrente è una parentesi aperta `(`, viene valutata un'espressione tramite il metodo `evaluate_e()` fino a trovare la parentesi chiusa `)`.
+    /// - Se viene trovato un token inatteso (come una parentesi chiusa senza apertura o un altro token errato), viene restituito un errore.
+    /// - In caso di un errore generale (token non valido), viene restituito un errore di sintassi.
     ///
     /// # Ritorna
-    /// - `Ok(f64)` con il valore del fattore valutato.
-    /// - `Err(CalcError)` se si verifica un errore di sintassi (parentesi non corrispondenti, token imprevisti)
-    ///   o semantico (struttura non valida dell'espressione).
+    /// - `Ok(f64)` con il valore del fattore valutato (positivo o negativo, a seconda dei casi).
+    /// - `Err(TokenError)` se viene trovato un errore di sintassi (token inatteso, parentesi non corrispondenti, ecc.).
     ///
     /// # Esempi
     /// ```
-    /// // Valuta il numero semplice
     /// let mut parser = Parser::new("3.14 =");
-    /// assert_eq!(parser.evaluate_factor().unwrap(), 3.14);
+    /// assert_eq!(parser.evaluate_b().unwrap(), 3.14);
     /// ```
     ///
     /// ```
-    /// // Valuta la negazione di un numero
     /// let mut parser = Parser::new("-2.5 =");
-    /// assert_eq!(parser.evaluate_factor().unwrap(), -2.5);
+    /// assert_eq!(parser.evaluate_b().unwrap(), -2.5);
     /// ```
-    ///
-    /// ```
-    /// // Valuta espressione tra parentesi
-    /// let mut parser = Parser::new("(1 + 2) =");
-    /// assert_eq!(parser.evaluate_factor().unwrap(), 3.0);
-    /// ```
-    fn evaluate_factor(&mut self) -> CalcResult {
+    fn evaluate_b(&mut self) -> CalcResult {
         match self.next() {
             // Caso di numero: restituisce il numero come valore
             Some(Token::Number(n)) => Ok(n),
 
             // Caso di negazione: valuta il fattore successivo e lo nega
             Some(Token::Minus) => {
-                let val = self.evaluate_factor()?; // Negazione del fattore
-                trace_log!("Negazione di {}", val);
+                let val = self.evaluate_b()?; // Negazione del fattore
+                
+                info_log!("Negazione di {}", val);
                 Ok(-val)
             },
 
             // Caso di parentesi aperta: valuta l'espressione tra parentesi
             Some(Token::LeftParen) => {
-                let result = self.evaluate_expression()?;  // Analizza l'espressione tra parentesi
-                
+                let result = self.evaluate_e()?;  // Analizza l'espressione tra parentesi
+
                 match self.next() {
                     // Verifica che la parentesi chiusa corrisponda alla parentesi aperta
                     Some(Token::RightParen) => Ok(result),
-                    
+
                     // Se viene trovato un altro token invece di una parentesi chiusa, errore
                     Some(tok) => {
-                        error_log!("Token inatteso invece di ')': {:?}", tok);
+                        info_log!("Token inatteso invece di ')': {:?}", tok);
                         Err(TokenError::UnmatchedParenthesis { found: ')', position: self.position }.into())
                     },
-                    
+
                     // Se non c'è un token successivo (parentesi chiusa mancante)
                     None => Err(TokenError::UnmatchedParenthesis { found: '(', position: self.position }.into()),
                 }
@@ -717,18 +1002,18 @@ impl MathExpressionParser {
 
             // Caso di parentesi chiusa senza corrispondente parentesi aperta
             Some(Token::RightParen) => {
-                error_log!("Parentesi chiusa senza apertura");
+                info_log!("Parentesi chiusa senza apertura");
                 Err(TokenError::UnmatchedParenthesis { found: ')', position: self.position }.into())
             },
 
             // Caso di errore generale: token non valido trovato
             token => {
-                error_log!("Fattore non valido trovato: {:?}", token);
+                info_log!("Fattore non valido trovato: {:?}", token);
                 Err(TokenError::InvalidExpression("Espressione non valida".into()).into())
             }
         }
     }
-
+    
     /// Verifica se il valore è valido, controllando eventuali condizioni di overflow o underflow.
     ///
     /// # Ritorna
@@ -753,7 +1038,7 @@ impl MathExpressionParser {
             Ok(val)
         }
     }
-
+    
     /// Restituisce il token corrente senza avanzare nella posizione.
     ///
     /// # Ritorna
@@ -816,7 +1101,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(debug_assertions)]
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
 
-    let input = "((1+2))))) =";
+    let input = "(3 + 5 * (2 - 3) ^ 2) / (4 - 1) + -2 * (5 + 2) ^ 3 - 10 ="; // = -693.333 GIUSTA
     info_log!("Input espressione: {}", input);
 
     let mut tokenizer = Tokenizer::new(input);
