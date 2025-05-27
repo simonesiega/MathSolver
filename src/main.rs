@@ -1098,9 +1098,23 @@ mod tests {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    
     #[cfg(debug_assertions)]
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("debug")).init();
-
+    
+    /*
+    #[cfg(debug_assertions)]
+    {
+        env_logger::Builder::new()
+            .format(|buf, record| {
+                use std::io::Write;
+                writeln!(buf, "[{} {}] {}", record.level(), record.target(), record.args())
+            })
+            .filter_level(log::LevelFilter::Debug)
+            .init();
+    }
+    */
+    
     let input = "(3 + 5 * (2 - 3) ^ 2) / (4 - 1) + -2 * (5 + 2) ^ 3 - 10 ="; // = -693.333 GIUSTA
     info_log!("Input espressione: {}", input);
 
